@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Agent Dashboard</title>
+
+<style>
+body{font-family:Arial;background:#f2f2f2;padding:20px;}
+.box{background:#fff;padding:20px;max-width:500px;margin:auto;border-radius:10px;}
+input,button{width:100%;padding:10px;margin-top:10px;}
+button{background:#007bff;color:#fff;border:none;cursor:pointer;}
+.card{background:#eee;padding:10px;margin-top:10px;border-radius:5px;}
+.request{background:#fffae6;padding:8px;margin-top:5px;border-left:4px solid #ffc107;}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+<h2>Agent Dashboard</h2>
+
+<input type="text" id="mobile" placeholder="Enter Mobile Number">
+<button onclick="loadAgent()">Login</button>
+
+<div id="dashboard" style="display:none;">
+
+    <div class="card"><b>Mobile:</b> <span id="mobileDisplay"></span></div>
+    <div class="card"><b>Total Referrals:</b> <span id="refs"></span></div>
+    <div class="card"><b>Total Paid:</b> ₹<span id="paid"></span></div>
+    <div class="card"><b>Unpaid Balance:</b> ₹<span id="unpaid"></span></div>
+
+    <div class="card">
+        <b>Your WhatsApp Referral Link:</b>
+        <input type="text" id="refLink" readonly>
+        <button onclick="copyLink()">Copy Link</button>
+    </div>
+
+    <button onclick="requestPayment()">Request Payment</button>
+
+    <h3>Payment Requests</h3>
+    <div id="requests"></div>
+
+    <h3>Payment History</h3>
+    <div id="history"></div>
+
+</div>
+</div>
+
+<script>
+const CHANNEL_LINK = "https://whatsapp.com/channel/0029VbBAfD3Fy726WRej923P";
+const PER_REFERRAL_AMOUNT = 1;
+
+let currentMobile = "";
+
+/* ---------- LOAD AGENT ---------- */
+function loadAgent() {
+    let mobile = document.getElementById("mobile").value.trim();
+    if (!mobile) { alert("Enter mobile number"); return; }
+
+    currentMobile = mobile;
+
+    let agents = JSON.parse(localStorage.getItem("agents")) || {};
+
+    if (!agents[mobile]) {
+        agents[mobile] = {
+            name: mobile,
+            referrals: 0,
+            paymentHistory: []
+        };
+        localStorage.setItem("agents", JSON.stringify(agents));
+    }
+
+    document.getElementById("mobileDisplay").innerText = mobile;
+    document.getElementById("refLink").value =
+        CHANNEL_LINK + "?ref=" + mobile;
+
+    calculateReferrals();
+    updateDashboard();
+    displayRequests();
+
+    document.getElementById("dashboard").style.display = "block";
+}
+
+/* ---------- DASHBOARD UPDATE ---------- */
+function updateDashboard() {
+    let agents = JSON.parse(localStorage.getItem("agents")) || {};
+    let agent = agents[currentMobile];
+
+    let totalPaid = 0;
+    let historyHTML = "";
+
+    agent.paymentHistory.forEach(p => {
+        if (p.status === "Paid") totalPaid += Number(p.amount);
+        historyHTML += `📅 ${p.date} | ₹${p.amount} | ${p.method} | ${p.status}<br>`;
+    });
+
+    let totalEarning = agent.referrals * PER_REFERRAL_AMOUNT;
+    let unpaid = totalEarning - totalPaid;
+    if (unpaid < 0) unpaid = 0;
+
+    document.getElementById("refs").innerText = agent.referrals;
+    document.getElementById("paid").innerText = totalPaid;
+    document.getElementById("unpaid").innerText = unpaid;
+    document.getElementById("history").innerHTML = historyHTML || "No payments yet";
+}
+
+/* ---------- REQUEST PAYMENT (AUTO AMOUNT) ---------- */
+function requestPayment() {
+    let agents = JSON.parse(localStorage.getItem("agents")) || {};
+    let agent = agents[currentMobile];
+
+    let paid = 0;
+    agent.paymentHistory.forEach(p => {
+        if (p.status === "Paid") paid += Number(p.amount);
+    });
+
+    let unpaid = (agent.referrals * PER_REFERRAL_AMOUNT) - paid;
+
+    if (unpaid <= 0) {
+        alert("No unpaid balance available");
+        return;
+    }
+
+    let requests = JSON.parse(localStorage.getItem("paymentRequests")) || [];
+
+    // prevent duplicate pending requests
+    let exists = requests.some(
+        r => r.code === currentMobile && r.status === "Pending"
+    );
+    if (exists) {
+        alert("Payment request already pending");
+        return;
+    }
+
+    requests.unshift({
+        code: currentMobile,
+        amount: unpaid,
+        date: new Date().toLocaleString(),
+        status: "Pending"
+    });
+
+    localStorage.setItem("paymentRequests", JSON.stringify(requests));
+    alert("Payment request sent for ₹" + unpaid);
+    displayRequests();
+}
+
+/* ---------- DISPLAY REQUESTS ---------- */
+function displayRequests() {
+    let requests = JSON.parse(localStorage.getItem("paymentRequests")) || [];
+    let html = "";
+
+    requests
+        .filter(r => r.code === currentMobile)
+        .forEach(r => {
+            html += `<div class="request">₹${r.amount} | ${r.status} | ${r.date}</div>`;
+        });
+
+    document.getElementById("requests").innerHTML = html || "No requests";
+}
+
+/* ---------- COPY LINK ---------- */
+function copyLink() {
+    let link = document.getElementById("refLink");
+    link.select();
+    document.execCommand("copy");
+    alert("Referral link copied");
+}
+
+/* ---------- REFERRAL COUNT (24H LOGIC – DEMO SAFE) ---------- */
+function calculateReferrals() {
+    let agents = JSON.parse(localStorage.getItem("agents")) || {};
+    let joins = JSON.parse(localStorage.getItem("referralJoins")) || {};
+    let now = new Date();
+
+    for (let code in joins) {
+        joins[code].forEach(j => {
+            if (!j.counted && (now - new Date(j.joinDate)) >= 86400000) {
+                if (agents[code]) {
+                    agents[code].referrals++;
+                    j.counted = true;
+                }
+            }
+        });
+    }
+
+    localStorage.setItem("agents", JSON.stringify(agents));
+    localStorage.setItem("referralJoins", JSON.stringify(joins));
+}
+</script>
+
+</body>
+</html>
